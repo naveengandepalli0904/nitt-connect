@@ -82,20 +82,28 @@ app.post('/api/auth/send-otp', async (req, res) => {
     const expiresAt = Date.now() + OTP_EXP * 60 * 1000;
     OTP.save(email, code, expiresAt);
 
-    await fetch('https://api.emailjs.com/api/v1.0/email/send', {
-       method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          service_id:  process.env.EMAILJS_SERVICE_ID,
-          template_id: process.env.EMAILJS_TEMPLATE_ID,
-          user_id:     process.env.EMAILJS_PUBLIC_KEY,
-          accessToken: process.env.EMAILJS_PRIVATE_KEY,
-          template_params: {
-            to_email: email,
-            otp_code: code
-          }
-        })
-      }); 
+    await new Promise((resolve, reject) => {
+      const body = JSON.stringify({
+        service_id:  process.env.EMAILJS_SERVICE_ID,
+        template_id: process.env.EMAILJS_TEMPLATE_ID,
+        user_id:     process.env.EMAILJS_PUBLIC_KEY,
+        accessToken: process.env.EMAILJS_PRIVATE_KEY,
+        template_params: { to_email: email, otp_code: code }
+      });
+      const req = https.request({
+        hostname: 'api.emailjs.com',
+        path:     '/api/v1.0/email/send',
+        method:   'POST',
+        headers:  { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+      }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => res.statusCode === 200 ? resolve(data) : reject(new Error('EmailJS error: ' + data)));
+      });
+      req.on('error', reject);
+      req.write(body);
+      req.end();
+    }); 
     res.json({ ok: true });
   } catch (err) {
     console.error('send-otp error:', err.message);
