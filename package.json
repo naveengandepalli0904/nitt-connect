@@ -1,0 +1,19 @@
+{
+  "name": "nitt-connect",
+  "version": "1.0.0",
+  "description": "NITT Connect - Peer Q&A platform for NIT Trichy students",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^16.5.0",
+    "express": "^5.2.1",
+    "express-session": "^1.18.1",
+    "nodemailer": "^7.0.3",
+    "uuid": "^11.1.0"
+  }
+}

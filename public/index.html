@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NITT Connect — Ask. Answer. Learn from seniors.</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+  <!-- ── NAVBAR ──────────────────────────────────────────────────────────── -->
+  <nav class="navbar">
+    <div class="nav-inner">
+      <a href="/" class="nav-brand" id="homeLink">
+        <span class="logo-box">NITT</span>
+        <span class="brand-text">Connect</span>
+      </a>
+      <div class="nav-right">
+        <a href="/" class="nav-link" id="navHome">Home</a>
+        <button class="btn-primary" id="navLoginBtn">Login with NITT email</button>
+        <div class="user-chip hidden" id="userChip">
+          <div class="user-avatar" id="navAvatar"></div>
+          <div class="nav-user-info">
+            <span class="nav-user-name" id="navName"></span>
+            <span class="nav-user-meta" id="navMeta"></span>
+          </div>
+          <button class="btn-ghost btn-sm" id="navLogout">Sign out</button>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ── PAGES ────────────────────────────────────────────────────────────── -->
+  <main id="app">
+
+    <!-- FEED -->
+    <div id="pageFeed" class="page">
+      <div class="feed-hero">
+        <h1>Ask. Answer. Learn from seniors.</h1>
+        <p>A space for NITT juniors to get real answers — interview experiences, course advice, placement prep — straight from seniors.</p>
+        <div class="hero-actions">
+          <button class="btn-primary btn-lg" id="heroAskBtn">Ask a question</button>
+          <button class="btn-outline btn-lg" id="heroShareBtn">Share experience</button>
+        </div>
+      </div>
+      <div class="feed-controls">
+        <input type="text" id="searchInput" class="search-box" placeholder="Search questions…">
+        <select id="sortSelect" class="sort-select">
+          <option value="recent">Most recent</option>
+          <option value="upvotes">Most helpful</option>
+          <option value="views">Most viewed</option>
+        </select>
+      </div>
+      <div class="tag-bar" id="tagBar">
+        <button class="tag-pill active" data-tag="all">All</button>
+        <button class="tag-pill" data-tag="placements">placements</button>
+        <button class="tag-pill" data-tag="interview-experience">interview-experience</button>
+        <button class="tag-pill" data-tag="academics">academics</button>
+        <button class="tag-pill" data-tag="internships">internships</button>
+        <button class="tag-pill" data-tag="hostel">hostel</button>
+        <button class="tag-pill" data-tag="cse">cse</button>
+        <button class="tag-pill" data-tag="ece">ece</button>
+        <button class="tag-pill" data-tag="eee">eee</button>
+        <button class="tag-pill" data-tag="mechanical">mechanical</button>
+        <button class="tag-pill" data-tag="civil">civil</button>
+        <button class="tag-pill" data-tag="gate">gate</button>
+        <button class="tag-pill" data-tag="higher-studies">higher-studies</button>
+        <button class="tag-pill" data-tag="resume">resume</button>
+      </div>
+      <div class="posts-list" id="postsList">
+        <div class="loading-msg">Loading questions…</div>
+      </div>
+    </div>
+
+    <!-- DETAIL -->
+    <div id="pageDetail" class="page hidden">
+      <div class="detail-wrap">
+        <button class="back-btn" id="backBtn">← Back</button>
+        <div id="detailContent"></div>
+      </div>
+    </div>
+
+    <!-- NEW POST -->
+    <div id="pageNewPost" class="page hidden">
+      <div class="form-wrap">
+        <button class="back-btn" id="backFromForm">← Back</button>
+        <h2 id="formTitle">Ask a question</h2>
+        <input type="hidden" id="postType" value="question">
+        <div class="form-group">
+          <label>Title <span class="required">*</span></label>
+          <input type="text" id="fTitle" placeholder="Enter a title for your question" maxlength="150">
+          <span class="char-count" id="titleCount">0 / 150</span>
+        </div>
+        <div id="expFields" class="hidden">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Company <span class="required">*</span></label>
+              <input type="text" id="fCompany" placeholder="Google, Microsoft, TCS…">
+            </div>
+            <div class="form-group">
+              <label>Role <span class="required">*</span></label>
+              <input type="text" id="fRole" placeholder="Software Engineer, Data Analyst…">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>CTC / Stipend</label>
+              <input type="text" id="fCtc" placeholder="₹18 LPA">
+            </div>
+            <div class="form-group">
+              <label>Mode</label>
+              <select id="fMode">
+                <option value="oncampus">On-campus</option>
+                <option value="offcampus">Off-campus</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Interview rounds <span class="hint-label">(one per line)</span></label>
+            <div id="roundsList"></div>
+            <button class="btn-ghost btn-sm" id="addRoundBtn" type="button">+ Add round</button>
+          </div>
+          <div class="form-group">
+            <label>Resources used <span class="hint-label">(comma separated)</span></label>
+            <input type="text" id="fResources" placeholder="LeetCode, GeeksforGeeks, YouTube…">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Body <span class="required">*</span></label>
+          <textarea id="fBody" rows="6" placeholder="Write your question or experience"></textarea>
+        </div>
+        <div class="form-group">
+          <label>Tags</label>
+          <div class="tag-checkboxes" id="tagCheckboxes"></div>
+        </div>
+        <p class="form-error" id="formError"></p>
+        <button class="btn-primary btn-lg" id="submitPostBtn">Post</button>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ── LOGIN MODAL ──────────────────────────────────────────────────────── -->
+  <div class="modal-overlay hidden" id="loginModal">
+    <div class="modal-box">
+
+      <!-- Step 1: Email -->
+      <div id="stepEmail">
+        <button class="modal-close" id="closeLogin">✕</button>
+        <div class="modal-logo"><span class="logo-box">NITT</span> Connect</div>
+        <h2>Sign in</h2>
+        <p class="modal-sub">Only <strong>@nitt.edu</strong> email addresses are accepted.</p>
+        <div class="form-group">
+          <label>Institute email</label>
+          <input type="email" id="emailInput" placeholder="XXXXXX@nitt.edu" autocomplete="email">
+          <p class="field-error" id="emailError"></p>
+        </div>
+        <button class="btn-primary" id="sendOtpBtn" style="width:100%">Send OTP</button>
+      </div>
+
+      <!-- Step 2: OTP -->
+      <div id="stepOTP" class="hidden">
+        <button class="modal-close" id="closeLogin2">✕</button>
+        <div class="modal-logo"><span class="logo-box">NITT</span> Connect</div>
+        <h2>Check your inbox</h2>
+        <p class="modal-sub">OTP sent to <strong id="otpSentTo"></strong></p>
+        <div class="form-group">
+          <label>6-digit OTP</label>
+          <input type="text" id="otpInput" placeholder="XXXXXX" maxlength="6" class="otp-input" autocomplete="one-time-code" inputmode="numeric">
+          <p class="field-error" id="otpError"></p>
+        </div>
+        <button class="btn-primary" id="verifyOtpBtn" style="width:100%">Verify OTP</button>
+        <button class="btn-ghost" id="backToEmail" style="width:100%;margin-top:8px">← Change email</button>
+      </div>
+
+      <!-- Step 3: Profile setup (new users only) -->
+      <div id="stepProfile" class="hidden">
+        <div class="modal-logo"><span class="logo-box">NITT</span> Connect</div>
+        <h2>Complete your profile</h2>
+        <p class="modal-sub">This shows beside your posts so others know who you are.</p>
+        <div class="form-group">
+          <label>Full name <span class="required">*</span></label>
+          <input type="text" id="profileName" placeholder="ENTER YOUR NAME" autocomplete="name">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Branch <span class="required">*</span></label>
+            <select id="profileBranch">
+              <option value="">Select branch</option>
+              <option value="CSE">CSE</option>
+              <option value="ECE">ECE</option>
+              <option value="EEE">EEE</option>
+              <option value="Mech">Mechanical</option>
+              <option value="Civil">Civil</option>
+              <option value="Chemical">Chemical</option>
+              <option value="Metallurgy">Metallurgy</option>
+              <option value="Production">Production</option>
+              <option value="ICE">ICE</option>
+              
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Batch year <span class="required">*</span></label>
+            <input type="text" id="profileYear" placeholder="e.g. 2029" maxlength="4">
+          </div>
+        </div>
+        <p class="field-error" id="profileError"></p>
+        <button class="btn-primary" id="saveProfileBtn" style="width:100%">Save & continue</button>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>
