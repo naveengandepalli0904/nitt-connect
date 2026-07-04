@@ -2,7 +2,7 @@ require('dotenv').config();
 
 const express    = require('express');
 const session    = require('express-session');
-const nodemailer = require('nodemailer');
+const https = require('https');
 const { v4: uuidv4 } = require('uuid');
 const path       = require('path');
 const { OTP, Users, Posts } = require('./db');
@@ -82,17 +82,20 @@ app.post('/api/auth/send-otp', async (req, res) => {
     const expiresAt = Date.now() + OTP_EXP * 60 * 1000;
     OTP.save(email, code, expiresAt);
 
-    await transporter.sendMail({
-      from:    process.env.SMTP_FROM || process.env.SMTP_USER,
-      to:      email,
-      subject: code + ' — Your NITT Connect OTP',
-      html: '<div style="font-family:sans-serif;max-width:420px;margin:auto">'
-          + '<h2 style="color:#1e3a8a">NITT Connect</h2>'
-          + '<p>Your one-time password is:</p>'
-          + '<div style="font-size:36px;font-weight:700;letter-spacing:8px;color:#1e3a8a;margin:16px 0">' + code + '</div>'
-          + '<p style="color:#666">Expires in ' + OTP_EXP + ' minutes. Do not share.</p>'
-          + '</div>'
-    });
+    await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+       method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          service_id:  process.env.EMAILJS_SERVICE_ID,
+          template_id: process.env.EMAILJS_TEMPLATE_ID,
+          user_id:     process.env.EMAILJS_PUBLIC_KEY,
+          accessToken: process.env.EMAILJS_PRIVATE_KEY,
+          template_params: {
+            to_email: email,
+            otp_code: code
+          }
+        })
+      }); 
     res.json({ ok: true });
   } catch (err) {
     console.error('send-otp error:', err.message);
