@@ -1,10 +1,10 @@
 require('dotenv').config();
 
-const express    = require('express');
-const session    = require('express-session');
-const https = require('https');
+const express = require('express');
+const session = require('express-session');
+const https   = require('https');
 const { v4: uuidv4 } = require('uuid');
-const path       = require('path');
+const path    = require('path');
 const { OTP, Users, Posts } = require('./db');
 
 const app  = express();
@@ -20,17 +20,6 @@ app.use(session({
   saveUninitialized: false,
   cookie:            { secure: false, maxAge: 7 * 24 * 60 * 60 * 1000 }
 }));
-
-// ─── Email transporter ────────────────────────────────────────────────────────
-const transporter = nodemailer.createTransport({
-  host:   process.env.SMTP_HOST || 'smtp.gmail.com',
-  port:   parseInt(process.env.SMTP_PORT || '587'),
-  secure: process.env.SMTP_SECURE === 'true',
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
-  }
-});
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const DOMAIN  = process.env.ALLOWED_EMAIL_DOMAIN || 'nitt.edu';
@@ -64,10 +53,47 @@ function deriveYear(email) {
 function timeAgo(dateStr) {
   const s = Math.floor((Date.now() - new Date(dateStr)) / 1000);
   if (s < 60)     return 'just now';
-  if (s < 3600)   return Math.floor(s/60) + 'm ago';
-  if (s < 86400)  return Math.floor(s/3600) + 'h ago';
-  if (s < 604800) return Math.floor(s/86400) + 'd ago';
-  return new Date(dateStr).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' });
+  if (s < 3600)   return Math.floor(s / 60) + 'm ago';
+  if (s < 86400)  return Math.floor(s / 3600) + 'h ago';
+  if (s < 604800) return Math.floor(s / 86400) + 'd ago';
+  return new Date(dateStr).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+// ─── Send email via EmailJS ───────────────────────────────────────────────────
+function sendOTPEmail(toEmail, code) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      service_id:  process.env.EMAILJS_SERVICE_ID,
+      template_id: process.env.EMAILJS_TEMPLATE_ID,
+      user_id:     process.env.EMAILJS_PUBLIC_KEY,
+      accessToken: process.env.EMAILJS_PRIVATE_KEY,
+      template_params: {
+        to_email: toEmail,
+        otp_code: code
+      }
+    });
+
+    const req = https.request({
+      hostname: 'api.emailjs.com',
+      path:     '/api/v1.0/email/send',
+      method:   'POST',
+      headers:  {
+        'Content-Type':   'application/json',
+        'Content-Length': Buffer.byteLength(body)
+      }
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        if (res.statusCode === 200) resolve(data);
+        else reject(new Error('EmailJS error ' + res.statusCode + ': ' + data));
+      });
+    });
+
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
 }
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
@@ -82,32 +108,11 @@ app.post('/api/auth/send-otp', async (req, res) => {
     const expiresAt = Date.now() + OTP_EXP * 60 * 1000;
     OTP.save(email, code, expiresAt);
 
-    await new Promise((resolve, reject) => {
-      const body = JSON.stringify({
-        service_id:  process.env.EMAILJS_SERVICE_ID,
-        template_id: process.env.EMAILJS_TEMPLATE_ID,
-        user_id:     process.env.EMAILJS_PUBLIC_KEY,
-        accessToken: process.env.EMAILJS_PRIVATE_KEY,
-        template_params: { to_email: email, otp_code: code }
-      });
-      const req = https.request({
-        hostname: 'api.emailjs.com',
-        path:     '/api/v1.0/email/send',
-        method:   'POST',
-        headers:  { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
-      }, (res) => {
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => res.statusCode === 200 ? resolve(data) : reject(new Error('EmailJS error: ' + data)));
-      });
-      req.on('error', reject);
-      req.write(body);
-      req.end();
-    }); 
+    await sendOTPEmail(email, code);
     res.json({ ok: true });
   } catch (err) {
     console.error('send-otp error:', err.message);
-    res.status(500).json({ error: 'Failed to send OTP. Check SMTP settings in .env' });
+    res.status(500).json({ error: 'Failed to send OTP: ' + err.message });
   }
 });
 
@@ -119,20 +124,18 @@ app.post('/api/auth/verify-otp', (req, res) => {
     if (!email || !code) return res.status(400).json({ error: 'Email and OTP are required.' });
 
     const record = OTP.get(email);
-    if (!record)                       return res.status(400).json({ error: 'No OTP requested for this email.' });
-    if (Date.now() > record.expiresAt) { OTP.clear(email); return res.status(400).json({ error: 'OTP expired. Request a new one.' }); }
-    if (record.code !== code)          return res.status(400).json({ error: 'Incorrect OTP.' });
+    if (!record)                        return res.status(400).json({ error: 'No OTP requested for this email.' });
+    if (Date.now() > record.expiresAt)  { OTP.clear(email); return res.status(400).json({ error: 'OTP expired. Request a new one.' }); }
+    if (record.code !== code)           return res.status(400).json({ error: 'Incorrect OTP.' });
 
     OTP.clear(email);
 
-    // check if returning user with complete profile
     const existing = Users.find(email);
     if (existing && existing.profileSet) {
       req.session.user = existing;
       return res.json({ ok: true, user: existing, profileComplete: true });
     }
 
-    // new user — send back to profile step
     const placeholder = Users.upsert(email, deriveName(email), '', '');
     res.json({ ok: true, user: placeholder, profileComplete: false });
   } catch (err) {
@@ -141,7 +144,6 @@ app.post('/api/auth/verify-otp', (req, res) => {
   }
 });
 
-// Update profile (called after OTP for new users)
 app.post('/api/auth/update-profile', (req, res) => {
   try {
     const email  = (req.body.email  || '').trim().toLowerCase();
@@ -154,7 +156,7 @@ app.post('/api/auth/update-profile', (req, res) => {
     if (!branch) return res.status(400).json({ error: 'Branch is required.' });
     if (!year)   return res.status(400).json({ error: 'Batch year is required.' });
 
-    const user = Users.upsert(email, name, branch, year, true); // true = profileSet
+    const user = Users.upsert(email, name, branch, year, true);
     req.session.user = user;
     res.json({ ok: true, user });
   } catch (err) {
@@ -182,33 +184,33 @@ app.get('/api/posts', (req, res) => {
     const { tag, q, sort } = req.query;
 
     if (tag && tag !== 'all') posts = posts.filter(p => (p.tags || []).includes(tag));
-    if (q)  posts = posts.filter(p =>
+    if (q) posts = posts.filter(p =>
       (p.title || '').toLowerCase().includes(q.toLowerCase()) ||
       (p.body  || '').toLowerCase().includes(q.toLowerCase())
     );
 
-    if (sort === 'upvotes') posts.sort((a,b) => b.upvotes - a.upvotes);
-    else if (sort === 'views') posts.sort((a,b) => b.views - a.views);
-    else posts.sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+    if (sort === 'upvotes')     posts.sort((a, b) => b.upvotes - a.upvotes);
+    else if (sort === 'views')  posts.sort((a, b) => b.views - a.views);
+    else                        posts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
     const user = req.session.user || null;
     const slim = posts.map(p => ({
-      id:          p.id,
-      type:        p.type,
-      title:       p.title,
-      tags:        p.tags        || [],
-      authorName:  p.authorName,
-      branch:      p.branch,
-      year:        p.year,
-      company:     p.company     || null,
-      role:        p.role        || null,
-      ctc:         p.ctc         || null,
-      mode:        p.mode        || null,
-      upvotes:     p.upvotes     || 0,
-      answers:     p.answers     || 0,
-      views:       p.views       || 0,
-      hasUpvoted:  user ? Posts.hasUpvoted(p.id, user.email) : false,
-      timeAgo:     timeAgo(p.createdAt)
+      id:         p.id,
+      type:       p.type,
+      title:      p.title,
+      tags:       p.tags       || [],
+      authorName: p.authorName,
+      branch:     p.branch,
+      year:       p.year,
+      company:    p.company    || null,
+      role:       p.role       || null,
+      ctc:        p.ctc        || null,
+      mode:       p.mode       || null,
+      upvotes:    p.upvotes    || 0,
+      answers:    p.answers    || 0,
+      views:      p.views      || 0,
+      hasUpvoted: user ? Posts.hasUpvoted(p.id, user.email) : false,
+      timeAgo:    timeAgo(p.createdAt)
     }));
 
     res.json(slim);
@@ -224,7 +226,11 @@ app.get('/api/posts/:id', (req, res) => {
     if (!post) return res.status(404).json({ error: 'Not found' });
     Posts.update(post.id, { views: (post.views || 0) + 1 });
     const user = req.session.user || null;
-    res.json({ ...post, hasUpvoted: user ? Posts.hasUpvoted(post.id, user.email) : false, timeAgo: timeAgo(post.createdAt) });
+    res.json({
+      ...post,
+      hasUpvoted: user ? Posts.hasUpvoted(post.id, user.email) : false,
+      timeAgo: timeAgo(post.createdAt)
+    });
   } catch (err) {
     console.error('GET /api/posts/:id error:', err);
     res.status(500).json({ error: err.message });
@@ -238,13 +244,13 @@ app.post('/api/posts', requireAuth, (req, res) => {
 
     if (!title || title.trim().length < 10) return res.status(400).json({ error: 'Title must be at least 10 characters.' });
     if (!body  || body.trim().length  < 30) return res.status(400).json({ error: 'Body must be at least 30 characters.' });
-    if (!['question','experience'].includes(type)) return res.status(400).json({ error: 'Invalid type.' });
+    if (!['question', 'experience'].includes(type)) return res.status(400).json({ error: 'Invalid type.' });
 
-    const cleanTags = (Array.isArray(tags) ? tags : (tags||'').split(','))
+    const cleanTags = (Array.isArray(tags) ? tags : (tags || '').split(','))
       .map(t => t.trim().toLowerCase()).filter(t => VALID_TAGS.includes(t));
 
     const post = {
-      id:          'p' + uuidv4().replace(/-/g,'').slice(0,10),
+      id:          'p' + uuidv4().replace(/-/g, '').slice(0, 10),
       type,
       title:       title.trim(),
       body:        body.trim(),
@@ -317,5 +323,5 @@ app.get('/{*path}', (req, res) => {
 // ─── Start ────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log('\n✅ NITT Connect running at http://localhost:' + PORT);
-  console.log('   Configure email in .env (copy from .env.example)\n');
+  console.log('   EmailJS configured via EMAILJS_* environment variables\n');
 });
