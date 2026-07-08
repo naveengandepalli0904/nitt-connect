@@ -39,17 +39,6 @@ function deriveName(email) {
   if (!clean) return 'NITT Student';
   return clean.split(' ').filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
-function deriveBranch(email) {
-  const local = email.split('@')[0].toLowerCase();
-  const m = local.match(/^b\d{2}([a-z]+)\d+/);
-  if (!m) return 'CSE';
-  const map = { cs:'CSE', ec:'ECE', ee:'EEE', me:'Mech', ce:'Civil', ch:'Chemical', mt:'Metallurgy', pr:'Production' };
-  return map[m[1]] || m[1].toUpperCase();
-}
-function deriveYear(email) {
-  const m = email.split('@')[0].match(/^b(\d{2})/);
-  return m ? '20' + m[1] : String(new Date().getFullYear());
-}
 function timeAgo(dateStr) {
   const s = Math.floor((Date.now() - new Date(dateStr)) / 1000);
   if (s < 60)     return 'just now';
@@ -59,7 +48,7 @@ function timeAgo(dateStr) {
   return new Date(dateStr).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-// ─── Send email via EmailJS ───────────────────────────────────────────────────
+// ─── EmailJS ──────────────────────────────────────────────────────────────────
 function sendOTPEmail(toEmail, code) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({
@@ -67,29 +56,18 @@ function sendOTPEmail(toEmail, code) {
       template_id: process.env.EMAILJS_TEMPLATE_ID,
       user_id:     process.env.EMAILJS_PUBLIC_KEY,
       accessToken: process.env.EMAILJS_PRIVATE_KEY,
-      template_params: {
-        to_email: toEmail,
-        otp_code: code
-      }
+      template_params: { to_email: toEmail, otp_code: code }
     });
-
     const req = https.request({
       hostname: 'api.emailjs.com',
       path:     '/api/v1.0/email/send',
       method:   'POST',
-      headers:  {
-        'Content-Type':   'application/json',
-        'Content-Length': Buffer.byteLength(body)
-      }
+      headers:  { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
     }, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        if (res.statusCode === 200) resolve(data);
-        else reject(new Error('EmailJS error ' + res.statusCode + ': ' + data));
-      });
+      res.on('end', () => res.statusCode === 200 ? resolve(data) : reject(new Error('EmailJS error ' + res.statusCode + ': ' + data)));
     });
-
     req.on('error', reject);
     req.write(body);
     req.end();
@@ -106,8 +84,7 @@ app.post('/api/auth/send-otp', async (req, res) => {
 
     const code      = genOTP();
     const expiresAt = Date.now() + OTP_EXP * 60 * 1000;
-    OTP.save(email, code, expiresAt);
-
+    await OTP.save(email, code, expiresAt);
     await sendOTPEmail(email, code);
     res.json({ ok: true });
   } catch (err) {
@@ -116,27 +93,27 @@ app.post('/api/auth/send-otp', async (req, res) => {
   }
 });
 
-app.post('/api/auth/verify-otp', (req, res) => {
+app.post('/api/auth/verify-otp', async (req, res) => {
   try {
     const email = (req.body.email || '').trim().toLowerCase();
     const code  = (req.body.code  || '').trim();
 
     if (!email || !code) return res.status(400).json({ error: 'Email and OTP are required.' });
 
-    const record = OTP.get(email);
-    if (!record)                        return res.status(400).json({ error: 'No OTP requested for this email.' });
-    if (Date.now() > record.expiresAt)  { OTP.clear(email); return res.status(400).json({ error: 'OTP expired. Request a new one.' }); }
-    if (record.code !== code)           return res.status(400).json({ error: 'Incorrect OTP.' });
+    const record = await OTP.get(email);
+    if (!record)                       return res.status(400).json({ error: 'No OTP requested for this email.' });
+    if (Date.now() > record.expiresAt) { await OTP.clear(email); return res.status(400).json({ error: 'OTP expired. Request a new one.' }); }
+    if (record.code !== code)          return res.status(400).json({ error: 'Incorrect OTP.' });
 
-    OTP.clear(email);
+    await OTP.clear(email);
 
-    const existing = Users.find(email);
+    const existing = await Users.find(email);
     if (existing && existing.profileSet) {
       req.session.user = existing;
       return res.json({ ok: true, user: existing, profileComplete: true });
     }
 
-    const placeholder = Users.upsert(email, deriveName(email), '', '');
+    const placeholder = await Users.upsert(email, deriveName(email), '', '');
     res.json({ ok: true, user: placeholder, profileComplete: false });
   } catch (err) {
     console.error('verify-otp error:', err.message);
@@ -144,7 +121,7 @@ app.post('/api/auth/verify-otp', (req, res) => {
   }
 });
 
-app.post('/api/auth/update-profile', (req, res) => {
+app.post('/api/auth/update-profile', async (req, res) => {
   try {
     const email  = (req.body.email  || '').trim().toLowerCase();
     const name   = (req.body.name   || '').trim();
@@ -156,7 +133,7 @@ app.post('/api/auth/update-profile', (req, res) => {
     if (!branch) return res.status(400).json({ error: 'Branch is required.' });
     if (!year)   return res.status(400).json({ error: 'Batch year is required.' });
 
-    const user = Users.upsert(email, name, branch, year, true);
+    const user = await Users.upsert(email, name, branch, year, true);
     req.session.user = user;
     res.json({ ok: true, user });
   } catch (err) {
@@ -178,9 +155,9 @@ app.get('/api/auth/me', (req, res) => {
 
 const VALID_TAGS = ['placements','interview-experience','academics','internships','hostel','cse','ece','eee','mechanical','civil','gate','higher-studies','resume'];
 
-app.get('/api/posts', (req, res) => {
+app.get('/api/posts', async (req, res) => {
   try {
-    let posts = Posts.all();
+    let posts = await Posts.all();
     const { tag, q, sort } = req.query;
 
     if (tag && tag !== 'all') posts = posts.filter(p => (p.tags || []).includes(tag));
@@ -189,12 +166,12 @@ app.get('/api/posts', (req, res) => {
       (p.body  || '').toLowerCase().includes(q.toLowerCase())
     );
 
-    if (sort === 'upvotes')     posts.sort((a, b) => b.upvotes - a.upvotes);
-    else if (sort === 'views')  posts.sort((a, b) => b.views - a.views);
-    else                        posts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    if (sort === 'upvotes')    posts.sort((a, b) => b.upvotes - a.upvotes);
+    else if (sort === 'views') posts.sort((a, b) => b.views - a.views);
+    else                       posts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
     const user = req.session.user || null;
-    const slim = posts.map(p => ({
+    const slim = await Promise.all(posts.map(async p => ({
       id:         p.id,
       type:       p.type,
       title:      p.title,
@@ -209,9 +186,9 @@ app.get('/api/posts', (req, res) => {
       upvotes:    p.upvotes    || 0,
       answers:    p.answers    || 0,
       views:      p.views      || 0,
-      hasUpvoted: user ? Posts.hasUpvoted(p.id, user.email) : false,
+      hasUpvoted: user ? await Posts.hasUpvoted(p.id, user.email) : false,
       timeAgo:    timeAgo(p.createdAt)
-    }));
+    })));
 
     res.json(slim);
   } catch (err) {
@@ -220,15 +197,15 @@ app.get('/api/posts', (req, res) => {
   }
 });
 
-app.get('/api/posts/:id', (req, res) => {
+app.get('/api/posts/:id', async (req, res) => {
   try {
-    const post = Posts.get(req.params.id);
+    const post = await Posts.get(req.params.id);
     if (!post) return res.status(404).json({ error: 'Not found' });
-    Posts.update(post.id, { views: (post.views || 0) + 1 });
+    await Posts.update(post.id, { views: (post.views || 0) + 1 });
     const user = req.session.user || null;
     res.json({
       ...post,
-      hasUpvoted: user ? Posts.hasUpvoted(post.id, user.email) : false,
+      hasUpvoted: user ? await Posts.hasUpvoted(post.id, user.email) : false,
       timeAgo: timeAgo(post.createdAt)
     });
   } catch (err) {
@@ -237,7 +214,7 @@ app.get('/api/posts/:id', (req, res) => {
   }
 });
 
-app.post('/api/posts', requireAuth, (req, res) => {
+app.post('/api/posts', requireAuth, async (req, res) => {
   try {
     const { type, title, body, tags, company, role, ctc, mode, rounds, resources } = req.body;
     const user = req.session.user;
@@ -249,7 +226,7 @@ app.post('/api/posts', requireAuth, (req, res) => {
     const cleanTags = (Array.isArray(tags) ? tags : (tags || '').split(','))
       .map(t => t.trim().toLowerCase()).filter(t => VALID_TAGS.includes(t));
 
-    const post = {
+    const post = await Posts.add({
       id:          'p' + uuidv4().replace(/-/g, '').slice(0, 10),
       type,
       title:       title.trim(),
@@ -259,18 +236,17 @@ app.post('/api/posts', requireAuth, (req, res) => {
       authorName:  user.name,
       branch:      user.branch,
       year:        user.year,
-      company:     company   || null,
-      role:        role      || null,
-      ctc:         ctc       || null,
-      mode:        mode      || null,
+      company:     company || null,
+      role:        role    || null,
+      ctc:         ctc     || null,
+      mode:        mode    || null,
       rounds:      Array.isArray(rounds)    ? rounds.filter(r => r && r.trim())    : [],
       resources:   Array.isArray(resources) ? resources.filter(r => r && r.trim()) : [],
-      upvotes:     0, answers: 0, views: 0,
-      voters:      [], answerList: [],
-      createdAt:   new Date().toISOString()
-    };
+      upvotes: 0, answers: 0, views: 0,
+      voters: [], answerList: [],
+      createdAt: new Date()
+    });
 
-    Posts.add(post);
     res.json({ ok: true, post });
   } catch (err) {
     console.error('POST /api/posts error:', err);
@@ -278,18 +254,18 @@ app.post('/api/posts', requireAuth, (req, res) => {
   }
 });
 
-app.post('/api/posts/:id/upvote', requireAuth, (req, res) => {
+app.post('/api/posts/:id/upvote', requireAuth, async (req, res) => {
   try {
-    const post = Posts.upvote(req.params.id, req.session.user.email);
+    const post = await Posts.upvote(req.params.id, req.session.user.email);
     if (!post) return res.status(404).json({ error: 'Not found' });
-    res.json({ upvotes: post.upvotes, hasUpvoted: Posts.hasUpvoted(post.id, req.session.user.email) });
+    res.json({ upvotes: post.upvotes, hasUpvoted: await Posts.hasUpvoted(post.id, req.session.user.email) });
   } catch (err) {
     console.error('upvote error:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-app.post('/api/posts/:id/answers', requireAuth, (req, res) => {
+app.post('/api/posts/:id/answers', requireAuth, async (req, res) => {
   try {
     const { body } = req.body;
     if (!body || body.trim().length < 5) return res.status(400).json({ error: 'Answer is too short.' });
@@ -303,10 +279,10 @@ app.post('/api/posts/:id/answers', requireAuth, (req, res) => {
       year:        user.year,
       body:        body.trim(),
       upvotes:     0,
-      createdAt:   new Date().toISOString()
+      createdAt:   new Date()
     };
 
-    const result = Posts.addAnswer(req.params.id, answer);
+    const result = await Posts.addAnswer(req.params.id, answer);
     if (!result) return res.status(404).json({ error: 'Post not found' });
     res.json({ ok: true, answer: { ...answer, timeAgo: 'just now' } });
   } catch (err) {
@@ -322,6 +298,5 @@ app.get('/{*path}', (req, res) => {
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
-  console.log('\n✅ NITT Connect running at http://localhost:' + PORT);
-  console.log('   EmailJS configured via EMAILJS_* environment variables\n');
+  console.log('\n✅ NITT Connect running at http://localhost:' + PORT + '\n');
 });

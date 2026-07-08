@@ -1,141 +1,164 @@
-const fs   = require('fs');
-const path = require('path');
+const mongoose = require('mongoose');
 
-const DB_DIR  = path.join(__dirname, 'data');
-const POSTS_F = path.join(DB_DIR, 'posts.json');
-const USERS_F = path.join(DB_DIR, 'users.json');
-const OTPS_F  = path.join(DB_DIR, 'otps.json');
+// ─── Connect ──────────────────────────────────────────────────────────────────
+let connected = false;
 
-// always ensure data dir exists
-function ensureDir() {
-  if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
+async function connect() {
+  if (connected) return;
+  await mongoose.connect(process.env.MONGODB_URI);
+  connected = true;
+  console.log('✅ MongoDB connected');
 }
 
-function readJSON(file, def) {
-  try {
-    if (!fs.existsSync(file)) return def;
-    const raw = fs.readFileSync(file, 'utf8');
-    if (!raw || raw.trim() === '') return def;
-    return JSON.parse(raw);
-  } catch (e) {
-    console.error('readJSON error for', file, e.message);
-    return def;
-  }
-}
+// ─── Schemas ──────────────────────────────────────────────────────────────────
 
-function writeJSON(file, data) {
-  try {
-    ensureDir();
-    fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
-  } catch (e) {
-    console.error('writeJSON error for', file, e.message);
-  }
-}
+const userSchema = new mongoose.Schema({
+  email:      { type: String, required: true, unique: true },
+  name:       { type: String, default: '' },
+  branch:     { type: String, default: '' },
+  year:       { type: String, default: '' },
+  profileSet: { type: Boolean, default: false },
+  joinedAt:   { type: Date, default: Date.now }
+});
+
+const otpSchema = new mongoose.Schema({
+  email:     { type: String, required: true, unique: true },
+  code:      { type: String, required: true },
+  expiresAt: { type: Number, required: true }
+});
+
+const answerSchema = new mongoose.Schema({
+  id:          String,
+  authorEmail: String,
+  authorName:  String,
+  branch:      String,
+  year:        String,
+  body:        String,
+  upvotes:     { type: Number, default: 0 },
+  createdAt:   { type: Date, default: Date.now }
+});
+
+const postSchema = new mongoose.Schema({
+  id:          { type: String, required: true, unique: true },
+  type:        { type: String, enum: ['question', 'experience'] },
+  title:       String,
+  body:        String,
+  tags:        [String],
+  authorEmail: String,
+  authorName:  String,
+  branch:      String,
+  year:        String,
+  company:     String,
+  role:        String,
+  ctc:         String,
+  mode:        String,
+  rounds:      [String],
+  resources:   [String],
+  upvotes:     { type: Number, default: 0 },
+  answers:     { type: Number, default: 0 },
+  views:       { type: Number, default: 0 },
+  voters:      [String],
+  answerList:  [answerSchema],
+  createdAt:   { type: Date, default: Date.now }
+});
+
+const User = mongoose.model('User', userSchema);
+const OTPModel = mongoose.model('OTP', otpSchema);
+const Post = mongoose.model('Post', postSchema);
 
 // ─── OTP ──────────────────────────────────────────────────────────────────────
 const OTP = {
-  save(email, code, expiresAt) {
-    ensureDir();
-    const all = readJSON(OTPS_F, {});
-    all[email] = { code, expiresAt };
-    writeJSON(OTPS_F, all);
+  async save(email, code, expiresAt) {
+    await connect();
+    await OTPModel.findOneAndUpdate(
+      { email },
+      { email, code, expiresAt },
+      { upsert: true, new: true }
+    );
   },
-  get(email) {
-    const all = readJSON(OTPS_F, {});
-    return all[email] || null;
+  async get(email) {
+    await connect();
+    return await OTPModel.findOne({ email }).lean();
   },
-  clear(email) {
-    const all = readJSON(OTPS_F, {});
-    delete all[email];
-    writeJSON(OTPS_F, all);
+  async clear(email) {
+    await connect();
+    await OTPModel.deleteOne({ email });
   }
 };
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 const Users = {
-  all() {
-    ensureDir();
-    return readJSON(USERS_F, []);
+  async find(email) {
+    await connect();
+    return await User.findOne({ email }).lean();
   },
-  find(email) {
-    return this.all().find(u => u.email === email) || null;
-  },
-  upsert(email, name, branch, year, profileSet = false) {
-    ensureDir();
-    const users = this.all();
-    const idx   = users.findIndex(u => u.email === email);
-    if (idx >= 0) {
-      users[idx] = { ...users[idx], name, branch, year, profileSet: profileSet || users[idx].profileSet || false };
-    } else {
-      users.push({ email, name, branch, year, profileSet, joinedAt: new Date().toISOString() });
-    }
-    writeJSON(USERS_F, users);
-    return this.find(email);
+  async upsert(email, name, branch, year, profileSet = false) {
+    await connect();
+    const user = await User.findOneAndUpdate(
+      { email },
+      { $set: { name, branch, year, profileSet: profileSet || false } },
+      { upsert: true, new: true }
+    ).lean();
+    return user;
   }
 };
 
-// ─── Seed posts ───────────────────────────────────────────────────────────────
-// Set to [] to start with no demo content
-const SEED = [];
-
 // ─── Posts ────────────────────────────────────────────────────────────────────
 const Posts = {
-  _ensureFile() {
-    ensureDir();
-    if (!fs.existsSync(POSTS_F)) {
-      writeJSON(POSTS_F, SEED);
-    }
+  async all() {
+    await connect();
+    return await Post.find().sort({ createdAt: -1 }).lean();
   },
 
-  all() {
-    this._ensureFile();
-    return readJSON(POSTS_F, []);
+  async get(id) {
+    await connect();
+    return await Post.findOne({ id }).lean();
   },
 
-  get(id) {
-    return this.all().find(p => p.id === id) || null;
+  async add(postData) {
+    await connect();
+    const post = new Post(postData);
+    await post.save();
+    return post.toObject();
   },
 
-  add(post) {
-    this._ensureFile();
-    const posts = this.all();
-    posts.unshift(post);
-    writeJSON(POSTS_F, posts);
+  async update(id, changes) {
+    await connect();
+    return await Post.findOneAndUpdate({ id }, { $set: changes }, { new: true }).lean();
   },
 
-  update(id, changes) {
-    this._ensureFile();
-    const posts = this.all();
-    const idx   = posts.findIndex(p => p.id === id);
-    if (idx < 0) return null;
-    posts[idx] = { ...posts[idx], ...changes };
-    writeJSON(POSTS_F, posts);
-    return posts[idx];
-  },
-
-  upvote(id, email) {
-    const post   = this.get(id);
+  async upvote(id, email) {
+    await connect();
+    const post = await Post.findOne({ id });
     if (!post) return null;
-    const voters = post.voters || [];
-    if (voters.includes(email)) {
-      return this.update(id, { upvotes: Math.max(0, post.upvotes - 1), voters: voters.filter(v => v !== email) });
+    if (post.voters.includes(email)) {
+      post.upvotes = Math.max(0, post.upvotes - 1);
+      post.voters  = post.voters.filter(v => v !== email);
     } else {
-      return this.update(id, { upvotes: (post.upvotes || 0) + 1, voters: [...voters, email] });
+      post.upvotes += 1;
+      post.voters.push(email);
     }
+    await post.save();
+    return post.toObject();
   },
 
-  hasUpvoted(id, email) {
-    const post = this.get(id);
+  async hasUpvoted(id, email) {
+    await connect();
+    const post = await Post.findOne({ id }).lean();
     return post ? (post.voters || []).includes(email) : false;
   },
 
-  addAnswer(postId, answer) {
-    const post    = this.get(postId);
-    if (!post) return null;
-    const answers = post.answerList || [];
-    answers.push(answer);
-    this.update(postId, { answerList: answers, answers: answers.length });
-    return answer;
+  async addAnswer(postId, answer) {
+    await connect();
+    const post = await Post.findOneAndUpdate(
+      { id: postId },
+      {
+        $push: { answerList: answer },
+        $inc:  { answers: 1 }
+      },
+      { new: true }
+    ).lean();
+    return post ? answer : null;
   }
 };
 
